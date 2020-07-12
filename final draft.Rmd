@@ -1,0 +1,997 @@
+---
+title: "final project"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+0. Inclide the library and process the data
+```{r}
+set.seed(441)
+library(MASS)
+library(factoextra)
+library(klaR)
+library(nnet)
+library(glmnet)
+library(mgcv)
+library(car)
+library(e1071)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(gbm)
+library(rlist)
+```
+
+```{r}
+pop <- read.csv("LOL.csv")
+getCols = function(pop, name) {
+  c(grep(name, colnames(pop)))
+}
+pop = pop[,-getCols(pop,"Type")]
+pop = pop[,-getCols(pop,"Year")]
+pop = pop[,-getCols(pop,"Season")]
+pop = pop[,-getCols(pop,"League")]
+# change it to our data later
+pop$bResult = ifelse(pop$bResult == 0, "Defeat", "Victory")
+pop$bResult = as.factor(pop$bResult)
+perm<-sample(x=nrow(pop))
+set1.full <- pop[which(perm<=nrow(pop)/2),]
+set2.full <- pop[which(nrow(pop)/2<perm & perm<=3*nrow(pop)/4),]
+set3.full <- pop[which(perm>3*nrow(pop)/4),]
+set1 = set1.full
+set2 = set2.full
+set3 = set3.full
+```
+
+numeric the data
+```{r}
+nset1.full = set1.full
+nset2.full = set2.full
+nset3.full = set3.full
+for (i in 1:64) {
+  nset1.full[,i] = as.numeric(set1.full[,i])
+  nset2.full[,i] = as.numeric(set2.full[,i])
+  nset3.full[,i] = as.numeric(set3.full[,i])
+}
+nset1 = nset1.full
+nset2 = nset2.full
+nset3 = nset3.full
+```
+
+1. Try the lda for variable selcetion
+```{r}
+lda.fit = lda(bResult~. , data = nset1)
+lda.pred.nset1 <- predict(lda.fit, nset1)
+lda.pred.nset2 <- predict(lda.fit, nset2)
+#lda.fit
+class.col <- ifelse(nset2$bResult==1,y=53,n=464)
+plot(lda.pred.nset2$x[,1], col=colors()[class.col], pch = 19)
+plot(lda.fit)
+lda.pred.train <- lda.pred.nset1$class
+lda.pred.val <- predict(lda.fit, nset2)$class
+lda.pred.test <- predict(lda.fit, nset3)$class
+mean(ifelse(lda.pred.train == nset1$bResult, yes=0, no=1))
+mean(ifelse(lda.pred.val == nset2$bResult, yes=0, no=1))
+mean(ifelse(lda.pred.test == nset3$bResult, yes=0, no=1))
+```
+ 
+ With all the explantory variables, linear discrement analysis has already been a perfect split with 1% test error rate. Look into the importance of explantory variable.
+ 
+```{r}
+lda.table = as.data.frame(as.table(lda.fit$scaling))
+lda.table = lda.table[order(abs(lda.table$Freq), decreasing = TRUE),]
+print.data.frame(lda.table[1:20,c(1,3)])
+```
+ 
+ Examining the top 20 explantory variables, we can see that the explantory variables named "number of ***" are especially important. It's reasonable, since these explantory variables are too strong as they are the data of game when the whole game is over. For example, if a team has more kills when the game is end, we can make an intuitive guess that that team win the game. 
+ And in terms of prediction, these explantory variables do not help the analysis. We actually cannot achive them until the end of the game. To achive the model for prediction, we should drop these explantory variables. (also the "game length")
+ 
+```{r}
+name = "Numof|gamelength"
+set1 = set1.full[,-getCols(set1.full, name)]
+set2 = set2.full[,-getCols(set2.full, name)]
+set3 = set3.full[,-getCols(set3.full, name)]
+nset1 = nset1.full[,-getCols(nset1.full, name)]
+nset2 = nset2.full[,-getCols(nset2.full, name)]
+nset3 = nset3.full[,-getCols(nset3.full, name)]
+```
+
+Then try lda again:
+```{r}
+lda.fit = lda(bResult~. , data = nset1)
+lda.pred.nset1 <- predict(lda.fit, nset1)
+lda.pred.nset2 <- predict(lda.fit, nset2)
+#lda.fit
+class.col <- ifelse(nset2$bResult==1,y=53,n=464)
+plot(lda.pred.nset2$x[,1], col=colors()[class.col], pch = 19)
+plot(lda.fit)
+lda.pred.train <- lda.pred.nset1$class
+lda.pred.val <- predict(lda.fit, nset2)$class
+lda.pred.test <- predict(lda.fit, nset3)$class
+mean(ifelse(lda.pred.train == nset1$bResult, yes=0, no=1))
+mean(ifelse(lda.pred.val == nset2$bResult, yes=0, no=1))
+mean(ifelse(lda.pred.test == nset3$bResult, yes=0, no=1))
+```
+
+```{r}
+lda.table = as.data.frame(as.table(lda.fit$scaling))
+lda.table = lda.table[order(abs(lda.table$Freq), decreasing = TRUE),]
+print.data.frame(lda.table[1:20,c(1,3)])
+```
+
+(option) delete the "first **" term (TODO: reason)
+```{r}
+name = "Numof|gamelength|First"
+set1 = set1.full[,-getCols(set1.full, name)]
+set2 = set2.full[,-getCols(set2.full, name)]
+set3 = set3.full[,-getCols(set3.full, name)]
+nset1 = nset1.full[,-getCols(nset1.full, name)]
+nset2 = nset2.full[,-getCols(nset2.full, name)]
+nset3 = nset3.full[,-getCols(nset3.full, name)]
+```
+
+```{r}
+lda.fit = lda(bResult~. , data = nset1)
+lda.pred.nset1 <- predict(lda.fit, nset1)
+lda.pred.nset2 <- predict(lda.fit, nset2)
+#lda.fit
+class.col <- ifelse(nset2$bResult==1,y=53,n=464)
+plot(lda.pred.nset2$x[,1], col=colors()[class.col], pch = 19)
+plot(lda.fit)
+lda.pred.train <- lda.pred.nset1$class
+lda.pred.val <- predict(lda.fit, nset2)$class
+lda.pred.test <- predict(lda.fit, nset3)$class
+mean(ifelse(lda.pred.train == nset1$bResult, yes=0, no=1))
+mean(ifelse(lda.pred.val == nset2$bResult, yes=0, no=1))
+mean(ifelse(lda.pred.test == nset3$bResult, yes=0, no=1))
+```
+
+```{r}
+lda.table = as.data.frame(as.table(lda.fit$scaling))
+lda.table = lda.table[order(abs(lda.table$Freq), decreasing = TRUE),]
+print.data.frame(lda.table[1:20,c(1,3)])
+```
+
+delete 30**
+```{r}
+name = "Numof|gamelength|First|30"
+set1 = set1.full[,-getCols(set1.full, name)]
+set2 = set2.full[,-getCols(set2.full, name)]
+set3 = set3.full[,-getCols(set3.full, name)]
+nset1 = nset1.full[,-getCols(nset1.full, name)]
+nset2 = nset2.full[,-getCols(nset2.full, name)]
+nset3 = nset3.full[,-getCols(nset3.full, name)]
+```
+
+```{r}
+lda.fit = lda(bResult~. , data = nset1)
+lda.pred.nset1 <- predict(lda.fit, nset1)
+lda.pred.nset2 <- predict(lda.fit, nset2)
+#lda.fit
+class.col <- ifelse(nset2$bResult==1,y=53,n=464)
+plot(lda.pred.nset2$x[,1], col=colors()[class.col], pch = 19)
+plot(lda.fit)
+lda.pred.train <- lda.pred.nset1$class
+lda.pred.val <- predict(lda.fit, nset2)$class
+lda.pred.test <- predict(lda.fit, nset3)$class
+mean(ifelse(lda.pred.train == nset1$bResult, yes=0, no=1))
+mean(ifelse(lda.pred.val == nset2$bResult, yes=0, no=1))
+mean(ifelse(lda.pred.test == nset3$bResult, yes=0, no=1))
+```
+
+```{r}
+lda.table = as.data.frame(as.table(lda.fit$scaling))
+lda.table = lda.table[order(abs(lda.table$Freq), decreasing = TRUE),]
+print.data.frame(lda.table[1:20,c(1,3)])
+```
+
+delete 20
+
+```{r}
+name = "Numof|gamelength|20|30|First"
+set1 = set1.full[,-getCols(set1.full, name)]
+set2 = set2.full[,-getCols(set2.full, name)]
+set3 = set3.full[,-getCols(set3.full, name)]
+nset1 = nset1.full[,-getCols(nset1.full, name)]
+nset2 = nset2.full[,-getCols(nset2.full, name)]
+nset3 = nset3.full[,-getCols(nset3.full, name)]
+```
+
+```{r}
+lda.fit = lda(bResult~. , data = nset1)
+lda.pred.nset1 <- predict(lda.fit, nset1)
+lda.pred.nset2 <- predict(lda.fit, nset2)
+#lda.fit
+class.col <- ifelse(nset2$bResult==1,y=53,n=464)
+plot(lda.pred.nset2$x[,1], col=colors()[class.col], pch = 19)
+plot(lda.fit)
+lda.pred.train <- lda.pred.nset1$class
+lda.pred.val <- predict(lda.fit, nset2)$class
+lda.pred.test <- predict(lda.fit, nset3)$class
+mean(ifelse(lda.pred.train == nset1$bResult, yes=0, no=1))
+mean(ifelse(lda.pred.val == nset2$bResult, yes=0, no=1))
+mean(ifelse(lda.pred.test == nset3$bResult, yes=0, no=1))
+```
+
+```{r}
+lda.table = as.data.frame(as.table(lda.fit$scaling))
+lda.table = lda.table[order(abs(lda.table$Freq), decreasing = TRUE),]
+print.data.frame(lda.table[1:20,c(1,3)])
+```
+
+delete 10**
+
+```{r}
+name = "Numof|gamelength|10|20|30|First"
+set1 = set1.full[,-getCols(set1.full, name)]
+set2 = set2.full[,-getCols(set2.full, name)]
+set3 = set3.full[,-getCols(set3.full, name)]
+nset1 = nset1.full[,-getCols(nset1.full, name)]
+nset2 = nset2.full[,-getCols(nset2.full, name)]
+nset3 = nset3.full[,-getCols(nset3.full, name)]
+```
+
+```{r}
+lda.fit = lda(bResult~. , data = nset1)
+lda.pred.nset1 <- predict(lda.fit, nset1)
+lda.pred.nset2 <- predict(lda.fit, nset2)
+#lda.fit
+class.col <- ifelse(nset2$bResult==1,y=53,n=464)
+plot(lda.pred.nset2$x[,1], col=colors()[class.col], pch = 19)
+plot(lda.fit)
+lda.pred.train <- lda.pred.nset1$class
+lda.pred.val <- predict(lda.fit, nset2)$class
+lda.pred.test <- predict(lda.fit, nset3)$class
+mean(ifelse(lda.pred.train == nset1$bResult, yes=0, no=1))
+mean(ifelse(lda.pred.val == nset2$bResult, yes=0, no=1))
+mean(ifelse(lda.pred.test == nset3$bResult, yes=0, no=1))
+```
+
+```{r}
+lda.table = as.data.frame(as.table(lda.fit$scaling))
+lda.table = lda.table[order(abs(lda.table$Freq), decreasing = TRUE),]
+print.data.frame(lda.table[1:20,c(1,3)])
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+1. Final data set selection
+
+
+```{r}
+name = "Numof|gamelength|20|30|First|Champ|Tag"
+set1.prediction.10 = set1.full[,-getCols(set1.full, name)]
+set2.prediction.10 = set2.full[,-getCols(set2.full, name)]
+set3.prediction.10 = set3.full[,-getCols(set3.full, name)]
+nset1.prediction.10 = nset1.full[,-getCols(nset1.full, name)]
+nset2.prediction.10 = nset2.full[,-getCols(nset2.full, name)]
+nset3.prediction.10 = nset3.full[,-getCols(nset3.full, name)]
+```
+
+```{r}
+name = "Numof|gamelength|30|First|Champ|Tag"
+set1.prediction.20 = set1.full[,-getCols(set1.full, name)]
+set2.prediction.20 = set2.full[,-getCols(set2.full, name)]
+set3.prediction.20 = set3.full[,-getCols(set3.full, name)]
+nset1.prediction.20 = nset1.full[,-getCols(nset1.full, name)]
+nset2.prediction.20 = nset2.full[,-getCols(nset2.full, name)]
+nset3.prediction.20 = nset3.full[,-getCols(nset3.full, name)]
+```
+
+```{r}
+name = "Numof|gamelength|First|Champ|Tag"
+set1.prediction.30 = set1.full[,-getCols(set1.full, name)]
+set2.prediction.30 = set2.full[,-getCols(set2.full, name)]
+set3.prediction.30 = set3.full[,-getCols(set3.full, name)]
+nset1.prediction.30 = nset1.full[,-getCols(nset1.full, name)]
+nset2.prediction.30 = nset2.full[,-getCols(nset2.full, name)]
+nset3.prediction.30 = nset3.full[,-getCols(nset3.full, name)]
+```
+
+```{r}
+set1.prediction.list = list(set1.prediction.10, set1.prediction.20, set1.prediction.30)
+set2.prediction.list = list(set2.prediction.10, set2.prediction.20, set2.prediction.30)
+set3.prediction.list = list(set3.prediction.10, set3.prediction.20, set3.prediction.30)
+nset1.prediction.list = list(nset1.prediction.10, nset1.prediction.20, nset1.prediction.30)
+nset2.prediction.list = list(nset2.prediction.10, nset2.prediction.20, nset2.prediction.30)
+nset3.prediction.list = list(nset3.prediction.10, nset3.prediction.20, nset3.prediction.30)
+title.list = list("at 10", "at 20", "at 30")
+```
+
+
+pca rotated data
+```{r}
+set1.pca.prediction.list = list()
+set2.pca.prediction.list = list()
+set3.pca.prediction.list = list()
+for (i in 1:3) {
+  set1.prediction = set1.prediction.list[[i]]
+  set2.prediction = set2.prediction.list[[i]]
+  set3.prediction = set3.prediction.list[[i]]
+  pc <-  prcomp(x=set1.prediction[,-1], scale.=TRUE)
+  set1.pca.prediction.list <- list.append(set1.pca.prediction.list, 
+                                          data.frame(bResult = set1.prediction$bResult, pc$x))
+  set2.pca.prediction.list <- list.append(set2.pca.prediction.list,
+                                          data.frame(bResult = set2.prediction$bResult,
+                                                      predict(pc, newdata=set2.prediction[,-1])))
+  set3.pca.prediction.list <- list.append(set3.pca.prediction.list,
+                                          data.frame(bResult = set3.prediction$bResult,
+                                                     predict(pc, newdata=set3.prediction[,-1])))
+}
+```
+
+
+2. Model selection
+
+2.1 LDA
+
+```{r}
+lda.fit.list = list()
+for (nset1.prediction in nset1.prediction.list) {
+  #print(set1.prediction)
+  lda.fit.list = list.append(lda.fit.list, lda(bResult~. , data = nset1.prediction))
+}
+
+
+lda.train.err = c()
+lda.val.err = c()
+lda.test.err = c()
+par(mfrow=c(1,3))
+for (i in 1:3) {
+  lda.fit = lda.fit.list[[i]]
+  nset1.prediction = nset1.prediction.list[[i]]
+  nset2.prediction = nset2.prediction.list[[i]]
+  nset3.prediction = nset3.prediction.list[[i]]
+  title = title.list[[i]]
+  lda.pred.nset1 = predict(lda.fit, nset1.prediction)
+  lda.pred.nset2 = predict(lda.fit, nset2.prediction)
+  #lda.fit
+  class.col <- ifelse(nset2$bResult==1,y=53,n=464)
+  plot(lda.pred.nset2$x[,1], col=colors()[class.col], pch = 19, main = title)
+  #plot(lda.fit)
+  lda.pred.train <- lda.pred.nset1$class
+  lda.pred.val <- predict(lda.fit, nset2.prediction)$class
+  lda.pred.test <- predict(lda.fit, nset3.prediction)$class
+  lda.train.err = c(lda.train.err, mean(ifelse(lda.pred.train == nset1.prediction$bResult, yes=0, no=1)))
+  lda.val.err = c(lda.val.err, mean(ifelse(lda.pred.val == nset2.prediction$bResult, yes=0, no=1)))
+  lda.test.err = c(lda.test.err, mean(ifelse(lda.pred.test == nset3.prediction$bResult, yes=0, no=1)))
+}
+
+lda.train.err
+lda.val.err
+lda.test.err
+```
+
+2.2 QDA
+
+```{r}
+qda.fit.list = list()
+for (nset1.prediction in nset1.prediction.list) {
+  #print(set1.prediction)
+  qda.fit.list = list.append(qda.fit.list, qda(bResult~. , data = nset1.prediction))
+}
+
+
+qda.train.err = c()
+qda.val.err = c()
+qda.test.err = c()
+for (i in 1:3) {
+  qda.fit = qda.fit.list[[i]]
+  nset1.prediction = nset1.prediction.list[[i]]
+  nset2.prediction = nset2.prediction.list[[i]]
+  nset3.prediction = nset3.prediction.list[[i]]
+  title = title.list[[i]]
+  qda.pred.train <- predict(qda.fit, nset1.prediction)$class
+  qda.pred.val <- predict(qda.fit, nset2.prediction)$class
+  qda.pred.test <- predict(qda.fit, nset3.prediction)$class
+  qda.train.err = c(qda.train.err, mean(ifelse(qda.pred.train == nset1.prediction$bResult, yes=0, no=1)))
+  qda.val.err = c(qda.val.err, mean(ifelse(qda.pred.val == nset2.prediction$bResult, yes=0, no=1)))
+  qda.test.err = c(qda.test.err, mean(ifelse(qda.pred.test == nset3.prediction$bResult, yes=0, no=1)))
+}
+
+qda.train.err
+qda.val.err
+qda.test.err
+```
+
+
+2.3 logistic
+
+```{r}
+logit.fit.list = list()
+for (nset1.prediction in nset1.prediction.list) {
+  #print(set1.prediction)
+  logit.fit.list = list.append(logit.fit.list, glm(bResult - 1~. , data = nset1.prediction, family = binomial(link = "logit")))
+}
+
+
+logit.train.err = c()
+logit.val.err = c()
+logit.test.err = c()
+for (i in 1:3) {
+  logit.fit = logit.fit.list[[i]]
+  nset1.prediction = nset1.prediction.list[[i]]
+  nset2.prediction = nset2.prediction.list[[i]]
+  nset3.prediction = nset3.prediction.list[[i]]
+  title = title.list[[i]]
+  logit.pred.train <- ifelse(predict(logit.fit, nset1.prediction, type="response") < 0.5, 1, 2)
+  logit.pred.val <- ifelse(predict(logit.fit, nset2.prediction, type="response") < 0.5, 1, 2)
+  logit.pred.test <- ifelse(predict(logit.fit, nset3.prediction, type="response") < 0.5, 1, 2)
+  logit.train.err = c(logit.train.err, mean(ifelse(logit.pred.train == nset1.prediction$bResult, yes=0, no=1)))
+  logit.val.err = c(logit.val.err, mean(ifelse(logit.pred.val == nset2.prediction$bResult, yes=0, no=1)))
+  logit.test.err = c(logit.test.err, mean(ifelse(logit.pred.test == nset3.prediction$bResult, yes=0, no=1)))
+}
+
+logit.train.err
+logit.val.err
+logit.test.err
+```
+
+(option) with pca rotation (?)
+```{r}
+logit.pca.fit.list = list()
+for (nset1.prediction in set1.pca.prediction.list) {
+  #print(nset1.prediction)
+  logit.pca.fit.list = list.append(logit.pca.fit.list, glm(bResult~. , data = nset1.prediction, family = binomial(link = "logit")))
+}
+
+
+logit.pca.train.err = c()
+logit.pca.val.err = c()
+logit.pca.test.err = c()
+logit.train.prob.list = list()
+for (i in 1:3) {
+  logit.pca.fit = logit.pca.fit.list[[i]]
+  nset1.prediction = set1.pca.prediction.list[[i]]
+  nset2.prediction = set2.pca.prediction.list[[i]]
+  nset3.prediction = set3.pca.prediction.list[[i]]
+  title = title.list[[i]]
+  logit.train.prob.list = list.append(logit.train.prob.list, predict(logit.pca.fit, nset1.prediction, type="response"))
+  logit.pca.pred.train <- ifelse(predict(logit.pca.fit, nset1.prediction, type="response") < 0.5, 1, 2)
+  logit.pca.pred.val <- ifelse(predict(logit.pca.fit, nset2.prediction, type="response") < 0.5, 1, 2)
+  logit.pca.pred.test <- ifelse(predict(logit.pca.fit, nset3.prediction, type="response") < 0.5, 1, 2)
+  logit.pca.train.err = c(logit.pca.train.err, mean(ifelse(logit.pca.pred.train == as.numeric(nset1.prediction$bResult), yes=0, no=1)))
+  logit.pca.val.err = c(logit.pca.val.err, mean(ifelse(logit.pca.pred.val == as.numeric(nset2.prediction$bResult), yes=0, no=1)))
+  logit.pca.test.err = c(logit.pca.test.err, mean(ifelse(logit.pca.pred.test == as.numeric(nset3.prediction$bResult), yes=0, no=1)))
+}
+
+logit.pca.train.err
+logit.pca.val.err
+logit.pca.test.err
+```
+
+
+2.4 LASSO logistic
+
+```{r}
+lasso.logit.fit.list = list()
+for (nset1.prediction in nset1.prediction.list) {
+  #print(set1.prediction)
+  lasso.logit.fit.list = list.append(lasso.logit.fit.list, cv.glmnet(as.matrix(nset1.prediction[,-1]), nset1.prediction[,1], nlambda = 30, nfolds = 3, family="multinomial"))
+}
+
+lasso.variable.list = list()
+
+
+lasso.logit.1se.train.err = c()
+lasso.logit.1se.val.err = c()
+lasso.logit.1se.test.err = c()
+lasso.logit.min.train.err = c()
+lasso.logit.min.val.err = c()
+lasso.logit.min.test.err = c()
+for (i in 1:3) {
+  lasso.logit.fit = lasso.logit.fit.list[[i]]
+  nset1.prediction = nset1.prediction.list[[i]]
+  nset2.prediction = nset2.prediction.list[[i]]
+  nset3.prediction = nset3.prediction.list[[i]]
+  title = title.list[[i]]
+  lasso.variable.list <- list.append(lasso.variable.list, predict(lasso.logit.fit, as.matrix(nset1.prediction[,-1]), type="coefficients", s=lasso.logit.fit$lambda.1se))
+  lasso.logit.pred.train <- predict(lasso.logit.fit, as.matrix(nset1.prediction[,-1]), type="class", s=lasso.logit.fit$lambda.1se)
+  lasso.logit.pred.val <- predict(lasso.logit.fit, as.matrix(nset2.prediction[,-1]), type="class", s=lasso.logit.fit$lambda.1se)
+  lasso.logit.pred.test <- predict(lasso.logit.fit, as.matrix(nset3.prediction[,-1]), type="class", s=lasso.logit.fit$lambda.1se)
+  lasso.logit.1se.train.err = c(lasso.logit.1se.train.err, mean(ifelse(lasso.logit.pred.train == nset1.prediction$bResult, yes=0, no=1)))
+  lasso.logit.1se.val.err = c(lasso.logit.1se.val.err, mean(ifelse(lasso.logit.pred.val == nset2.prediction$bResult, yes=0, no=1)))
+  lasso.logit.1se.test.err = c(lasso.logit.1se.test.err, mean(ifelse(lasso.logit.pred.test == nset3.prediction$bResult, yes=0, no=1)))
+  lasso.logit.pred.train <- predict(lasso.logit.fit, as.matrix(nset1.prediction[,-1]), type="class", s=lasso.logit.fit$lambda.min)
+  lasso.logit.pred.val <- predict(lasso.logit.fit, as.matrix(nset2.prediction[,-1]), type="class", s=lasso.logit.fit$lambda.min)
+  lasso.logit.pred.test <- predict(lasso.logit.fit, as.matrix(nset3.prediction[,-1]), type="class", s=lasso.logit.fit$lambda.min)
+  lasso.logit.min.train.err = c(lasso.logit.min.train.err, mean(ifelse(lasso.logit.pred.train == nset1.prediction$bResult, yes=0, no=1)))
+  lasso.logit.min.val.err = c(lasso.logit.min.val.err, mean(ifelse(lasso.logit.pred.val == nset2.prediction$bResult, yes=0, no=1)))
+  lasso.logit.min.test.err = c(lasso.logit.min.test.err, mean(ifelse(lasso.logit.pred.test == nset3.prediction$bResult, yes=0, no=1)))
+}
+
+lasso.logit.1se.train.err
+lasso.logit.1se.val.err
+lasso.logit.1se.test.err
+lasso.logit.min.train.err 
+lasso.logit.min.val.err 
+lasso.logit.min.test.err 
+```
+
+```{r}
+coef(lasso.logit.fit.list[[1]],s='lambda.1se',exact=TRUE)[[1]]
+```
+
+```{r}
+coef(lasso.logit.fit.list[[2]],s='lambda.1se',exact=TRUE)[[1]]
+```
+
+```{r}
+coef(lasso.logit.fit.list[[3]],s='lambda.1se',exact=TRUE)[[1]]
+```
+
+```{r}
+coef(lasso.logit.fit.list[[2]],s='lambda.min',exact=TRUE)[[1]]
+```
+
+2.5 Naive Bayes w/o kernel
+
+2.5.1. without rotation
+
+```{r}
+naive.k.fit.list = list()
+for (i in 1:3) {
+  nset1.prediction = nset1.prediction.list[[i]]
+  set1.prediction = set1.prediction.list[[i]]
+  naive.k.fit.list = list.append(naive.k.fit.list, naiveBayes(x=nset1.prediction[,-1], y=set1.prediction$bResult))
+}
+
+
+naive.k.train.err = c()
+naive.k.val.err = c()
+naive.k.test.err = c()
+for (i in 1:3) {
+  naive.k.fit = naive.k.fit.list[[i]]
+  set1.prediction = set1.prediction.list[[i]]
+  set2.prediction = set2.prediction.list[[i]]
+  set3.prediction = set3.prediction.list[[i]]
+  nset1.prediction = nset1.prediction.list[[i]]
+  nset2.prediction = nset2.prediction.list[[i]]
+  nset3.prediction = nset3.prediction.list[[i]]
+  title = title.list[[i]]
+  naive.k.pred.train <- predict(naive.k.fit, newdata=nset1.prediction[,-1], type="class")
+  naive.k.pred.val <- predict(naive.k.fit, newdata=nset2.prediction[,-1], type="class")
+  naive.k.pred.test <- predict(naive.k.fit, newdata=nset3.prediction[,-1], type="class")
+  naive.k.train.err = c(naive.k.train.err, mean(ifelse(naive.k.pred.train == set1.prediction$bResult, yes=0, no=1)))
+  naive.k.val.err = c(naive.k.val.err, mean(ifelse(naive.k.pred.val == set2.prediction$bResult, yes=0, no=1)))
+  naive.k.test.err = c(naive.k.test.err, mean(ifelse(naive.k.pred.test == set3.prediction$bResult, yes=0, no=1)))
+}
+
+naive.k.train.err
+naive.k.val.err
+naive.k.test.err
+```
+
+2.5.2 with pca rotation
+
+
+```{r}
+naive.k.pca.fit.list = list()
+for (i in 1:3) {
+  set1.prediction = set1.pca.prediction.list[[i]]
+  naive.k.pca.fit.list = list.append(naive.k.pca.fit.list, naiveBayes(x=set1.prediction[,-1], y=set1.prediction$bResult))
+}
+
+
+naive.k.pca.train.err = c()
+naive.k.pca.val.err = c()
+naive.k.pca.test.err = c()
+for (i in 1:3) {
+  naive.k.pca.fit = naive.k.pca.fit.list[[i]]
+  set1.prediction = set1.pca.prediction.list[[i]]
+  set2.prediction = set2.pca.prediction.list[[i]]
+  set3.prediction = set3.pca.prediction.list[[i]]
+  title = title.list[[i]]
+  naive.k.pca.pred.train <- predict(naive.k.pca.fit, newdata=set1.prediction[,-1], type="class")
+  naive.k.pca.pred.val <- predict(naive.k.pca.fit, newdata=set2.prediction[,-1], type="class")
+  naive.k.pca.pred.test <- predict(naive.k.pca.fit, newdata=set3.prediction[,-1], type="class")
+  naive.k.pca.train.err = c(naive.k.pca.train.err, mean(ifelse(naive.k.pca.pred.train == set1.prediction$bResult, yes=0, no=1)))
+  naive.k.pca.val.err = c(naive.k.pca.val.err, mean(ifelse(naive.k.pca.pred.val == set2.prediction$bResult, yes=0, no=1)))
+  naive.k.pca.test.err = c(naive.k.pca.test.err, mean(ifelse(naive.k.pca.pred.test == set3.prediction$bResult, yes=0, no=1)))
+}
+
+naive.k.pca.train.err
+naive.k.pca.val.err
+naive.k.pca.test.err
+```
+
+
+
+2.6 logistic gam
+
+For categorical variabels, set number of knots equal to the number of unique variables
+
+```{r}
+gam.logit.fit.list = list()
+for (i in 1:3) {
+  nset1.prediction = nset1.prediction.list[[i]]
+  set1.prediction = set1.prediction.list[[i]]
+  gam.formula = as.formula(paste0(colnames(nset1.prediction)[1]," - 1~",paste0("s(",colnames(nset1.prediction)[-1],")",collapse="+")))
+  gam.logit.fit.list = list.append(gam.logit.fit.list, gam(data=nset1.prediction, formula = gam.formula, family=binomial(link=logit)))
+}
+
+
+gam.logit.train.err = c()
+gam.logit.val.err = c()
+gam.logit.test.err = c()
+for (i in 1:3) {
+  gam.logit.fit = gam.logit.fit.list[[i]]
+  set1.prediction = set1.prediction.list[[i]]
+  set2.prediction = set2.prediction.list[[i]]
+  set3.prediction = set3.prediction.list[[i]]
+  nset1.prediction = nset1.prediction.list[[i]]
+  nset2.prediction = nset2.prediction.list[[i]]
+  nset3.prediction = nset3.prediction.list[[i]]
+  title = title.list[[i]]
+  gam.logit.pred.train <- as.numeric(predict(gam.logit.fit, nset1.prediction, type="link") > 0)
+  gam.logit.pred.val <- as.numeric(predict(gam.logit.fit, nset2.prediction, type="link") > 0)
+  gam.logit.pred.test <- as.numeric(predict(gam.logit.fit, nset3.prediction, type="link") > 0)
+  gam.logit.train.err = c(gam.logit.train.err, mean(ifelse(gam.logit.pred.train == as.numeric(nset1.prediction$bResult)-1, yes=0, no=1)))
+  gam.logit.val.err = c(gam.logit.val.err, mean(ifelse(gam.logit.pred.val == as.numeric(nset2.prediction$bResult)-1, yes=0, no=1)))
+  gam.logit.test.err = c(gam.logit.test.err, mean(ifelse(gam.logit.pred.test == as.numeric(nset3.prediction$bResult)-1, yes=0, no=1)))
+}
+
+gam.logit.train.err
+gam.logit.val.err
+gam.logit.test.err
+```
+
+
+2.7 single classification tree
+```{r}
+set.seed(441)
+# should use validation set, but seems for wheat it's too small?
+veh.tree.fit.list = list()
+for (nset1.prediction in nset1.prediction.list) {
+  veh.tree.fit.list = list.append(veh.tree.fit.list, veh.tree.fit <- rpart(data=nset1.prediction, bResult ~ ., method="class", cp=0.0001))
+}
+
+for (veh.tree.fit in veh.tree.fit.list) {
+  
+  plotcp(veh.tree.fit)
+}
+a = veh.tree.fit$cptable
+```
+
+```{r}
+veh.tree.1se.fit.list = list()
+tunedcp.list = c(0.012, 0.0068, 0.0074)
+for (i in 1:3) {
+  nset1.prediction = nset1.prediction.list[[i]]
+  set1.prediction = set1.prediction.list[[i]]
+  veh.tree.fit = veh.tree.fit.list[[i]]
+  tunedcp = tunedcp.list[[i]]
+  title = title.list[[i]]
+  veh.tree.1se.fit.list = list.append(veh.tree.1se.fit.list, prune(veh.tree.fit, cp=tunedcp))
+  prp(veh.tree.1se.fit.list[[i]], type=1, extra=1, main=paste0("1SE pruned tree ", title))
+}
+```
+
+```{r}
+veh.tree.1se.train.err = c()
+veh.tree.1se.val.err = c()
+veh.tree.1se.test.err = c()
+for (i in 1:3) {
+  veh.tree.1se.fit = veh.tree.1se.fit.list[[i]]
+  set1.prediction = set1.prediction.list[[i]]
+  set2.prediction = set2.prediction.list[[i]]
+  set3.prediction = set3.prediction.list[[i]]
+  nset1.prediction = nset1.prediction.list[[i]]
+  nset2.prediction = nset2.prediction.list[[i]]
+  nset3.prediction = nset3.prediction.list[[i]]
+  title = title.list[[i]]
+  veh.tree.1se.pred.train <- predict(veh.tree.1se.fit, newdata=nset1.prediction[,-1], type="class")
+  veh.tree.1se.pred.val <- predict(veh.tree.1se.fit, newdata=nset2.prediction[,-1], type="class")
+  veh.tree.1se.pred.test <- predict(veh.tree.1se.fit, newdata=nset3.prediction[,-1], type="class")
+  veh.tree.1se.train.err = c(veh.tree.1se.train.err, mean(ifelse(veh.tree.1se.pred.train == nset1.prediction$bResult, yes=0, no=1)))
+  veh.tree.1se.val.err = c(veh.tree.1se.val.err, mean(ifelse(veh.tree.1se.pred.val == nset2.prediction$bResult, yes=0, no=1)))
+  veh.tree.1se.test.err = c(veh.tree.1se.test.err, mean(ifelse(veh.tree.1se.pred.test == nset3.prediction$bResult, yes=0, no=1)))
+}
+
+veh.tree.1se.train.err
+veh.tree.1se.val.err
+veh.tree.1se.test.err
+```
+
+
+2.8 random forest
+
+```{r}
+veh.rftree.fit.list = list()
+veh.rftree.fit.500 <- randomForest(data=nset2.prediction.list[[1]], as.factor(bResult)~., 
+                       importance=TRUE, ntree=500, mtry=1, keep.forest=TRUE)
+veh.rftree.fit.500  # more useful here
+```
+```{r}
+veh.rftree.fit.1000 <- randomForest(data=nset2.prediction.list[[1]], as.factor(bResult)~., 
+                       importance=TRUE, ntree=1000, mtry=1, keep.forest=TRUE)
+veh.rftree.fit.1000  # more useful here
+```
+
+```{r}
+veh.rftree.fit.1500 <- randomForest(data=nset2.prediction.list[[1]], as.factor(bResult)~., 
+                       importance=TRUE, ntree=1500, mtry=1, keep.forest=TRUE)
+veh.rftree.fit.1500  # more useful here
+```
+
+```{r}
+veh.rftree.fit.list = list.append(veh.rftree.fit.list, veh.rftree.fit.1000)
+```
+
+```{r}
+veh.rftree.fit.500 <- randomForest(data=nset2.prediction.list[[2]], as.factor(bResult)~., 
+                       importance=TRUE, ntree=500, mtry=1, keep.forest=TRUE)
+veh.rftree.fit.500  # more useful here
+```
+```{r}
+veh.rftree.fit.1000 <- randomForest(data=nset2.prediction.list[[2]], as.factor(bResult)~., 
+                       importance=TRUE, ntree=1000, mtry=1, keep.forest=TRUE)
+veh.rftree.fit.1000  # more useful here
+```
+
+```{r}
+veh.rftree.fit.1500 <- randomForest(data=nset2.prediction.list[[2]], as.factor(bResult)~., 
+                       importance=TRUE, ntree=1500, mtry=1, keep.forest=TRUE)
+veh.rftree.fit.1500  # more useful here
+```
+
+```{r}
+veh.rftree.fit.list = list.append(veh.rftree.fit.list, veh.rftree.fit.1000)
+```
+
+```{r}
+veh.rftree.fit.500 <- randomForest(data=nset2.prediction.list[[3]], as.factor(bResult)~., 
+                       importance=TRUE, ntree=500, mtry=1, keep.forest=TRUE)
+veh.rftree.fit.500  # more useful here
+```
+
+```{r}
+veh.rftree.fit.1000 <- randomForest(data=nset2.prediction.list[[3]], as.factor(bResult)~., 
+                       importance=TRUE, ntree=1000, mtry=1, keep.forest=TRUE)
+veh.rftree.fit.1000  # more useful here
+```
+
+```{r}
+veh.rftree.fit.1500 <- randomForest(data=nset2.prediction.list[[3]], as.factor(bResult)~., 
+                       importance=TRUE, ntree=1500, mtry=1, keep.forest=TRUE)
+veh.rftree.fit.1500  # more useful here
+```
+
+```{r}
+veh.rftree.fit.list = list.append(veh.rftree.fit.list, veh.rftree.fit.1000)
+```
+
+
+
+```{r}
+veh.rftree.train.err = c()
+veh.rftree.val.err = c()
+veh.rftree.test.err = c()
+for (veh.rftree.fit in veh.rftree.fit.list) {
+  a = round(importance(veh.rftree.fit),3)
+  print.table(as.table(a[order(a[,4], decreasing = TRUE),]))
+}
+for (i in 1:3) {
+  veh.rftree.fit = veh.rftree.fit.list[[i]]
+  set1.prediction = set1.prediction.list[[i]]
+  set2.prediction = set2.prediction.list[[i]]
+  set3.prediction = set3.prediction.list[[i]]
+  nset1.prediction = nset1.prediction.list[[i]]
+  nset2.prediction = nset2.prediction.list[[i]]
+  nset3.prediction = nset3.prediction.list[[i]]
+  title = title.list[[i]]
+  veh.rftree.pred.train <- predict(veh.rftree.fit, nset1.prediction, type="response")
+  veh.rftree.pred.val <- predict(veh.rftree.fit, nset2.prediction, type="response")
+  veh.rftree.pred.test <- predict(veh.rftree.fit, nset3.prediction, type="response")
+  veh.rftree.train.err = c(veh.rftree.train.err, mean(ifelse(veh.rftree.pred.train == nset1.prediction$bResult, yes=0, no=1)))
+  veh.rftree.val.err = c(veh.rftree.val.err, mean(ifelse(veh.rftree.pred.val == nset2.prediction$bResult, yes=0, no=1)))
+  veh.rftree.test.err = c(veh.rftree.test.err, mean(ifelse(veh.rftree.pred.test == nset3.prediction$bResult, yes=0, no=1)))
+}
+
+veh.rftree.train.err
+veh.rftree.val.err
+veh.rftree.test.err
+```
+
+2.9 gbm
+```{r}
+gbm.fit.list = list()
+for (i in 1:3) {
+  nset1.prediction = nset1.prediction.list[[i]]
+  set1.prediction = set1.prediction.list[[i]]
+  gbm.fit.list = list.append(gbm.fit.list, gbm(data=set1.prediction, formula=bResult~., 
+                         distribution="multinomial", verbose=FALSE, 
+                         n.trees=1000, interaction.depth=6, shrinkage=0.001, 
+                         bag.fraction=0.5, cv.folds=5))
+}
+```
+
+```{r}
+gbm.final.tree.list = list()
+gbm.rel.inf.list = list()
+for (gbm.fit in gbm.fit.list) {
+  par(mfrow=c(1,2))
+  ntrees.final <- gbm.perf(gbm.fit, method="cv" )
+  gbm.rel.inf.list = list.append(gbm.rel.inf.list, summary(gbm.fit, n.trees=ntrees.final))
+  gbm.final.tree.list <- list.append(gbm.final.tree.list, gbm.perf(gbm.fit,plot.it = FALSE, method="cv" )) 
+}
+
+```
+
+```{r}
+for (i in 1:3) {
+  print(gbm.rel.inf.list[[i]][1:10,])
+}
+```
+
+```{r}
+gbm.train.err = c()
+gbm.val.err = c()
+gbm.test.err = c()
+for (i in 1:3) {
+  gbm.fit = gbm.fit.list[[i]]
+  gbm.final.tree = gbm.final.tree.list[[i]]
+  set1.prediction = set1.prediction.list[[i]]
+  set2.prediction = set2.prediction.list[[i]]
+  set3.prediction = set3.prediction.list[[i]]
+  nset1.prediction = nset1.prediction.list[[i]]
+  nset2.prediction = nset2.prediction.list[[i]]
+  nset3.prediction = nset3.prediction.list[[i]]
+  title = title.list[[i]]
+  gbm.pred.train <- predict(gbm.fit, newdata=nset1.prediction, n.trees=gbm.final.tree, type="response")
+  class.mul.train.final <- apply(gbm.pred.train[,,1], 1, which.max)
+  gbm.pred.val <-predict(gbm.fit, newdata=nset2.prediction, n.trees=gbm.final.tree, type="response")
+  class.mul.val.final <- apply(gbm.pred.val[,,1], 1, which.max)
+  gbm.pred.test <- predict(gbm.fit, newdata=nset3.prediction, n.trees=gbm.final.tree, type="response")
+  class.mul.test.final <- apply(gbm.pred.test[,,1], 1, which.max)
+  gbm.train.err = c(gbm.train.err, mean(ifelse(class.mul.train.final == as.numeric(set1.prediction$bResult), yes=0, no=1)))
+  gbm.val.err = c(gbm.val.err, mean(ifelse(class.mul.val.final == as.numeric(set2.prediction$bResult), yes=0, no=1)))
+  gbm.test.err = c(gbm.test.err, mean(ifelse(class.mul.test.final == as.numeric(set3.prediction$bResult), yes=0, no=1)))
+}
+
+gbm.train.err
+gbm.val.err
+gbm.test.err
+```
+
+
+2.10 SVM
+```{r}
+set.seed(441)
+veh.tune <-  tune.svm(data=set2.prediction.list[[1]], bResult ~ ., kernel="radial", gamma = 10^(-10:-7), cost = 10^(5:7)) 
+```
+
+```{r}
+summary(veh.tune) 
+aa <- summary(veh.tune)$performances 
+aa[order(aa[,3]),] 
+#### Note: Optimum is on edge of parameter space. Ought to pursue further (larger) costs
+###x11(h=7, w=6, pointsize=12)
+plot(veh.tune, type="contour", transform.x=log10, transform.y=log10)
+#x11(h=7, w=6, pointsize=12)
+plot(veh.tune, type="perspective", transform.x=log10, transform.y=log10, theta=150)
+```
+
+```{r}
+svm.train.err=c()
+svm.val.err=c()
+svm.test.err=c()
+svm.fit <- svm(data=set1.prediction.list[[1]], bResult ~ ., kernel="radial", gamma=1e-8, cost=1e7, cross=5)
+svm.pred.train <- predict(svm.fit, newdata=set1.prediction.list[[1]])
+svm.pred.val <- predict(svm.fit, newdata=set2.prediction.list[[1]])
+svm.pred.test <- predict(svm.fit, newdata=set3.prediction.list[[1]])
+svm.train.err = c(svm.train.err, mean(ifelse(svm.pred.train == set1.prediction.list[[1]]$bResult, yes=0, no=1)))
+svm.val.err = c(svm.val.err, mean(ifelse(svm.pred.val == set2.prediction.list[[1]]$bResult, yes=0, no=1)))
+svm.test.err = c(svm.test.err, mean(ifelse(svm.pred.test == set3.prediction.list[[1]]$bResult, yes=0, no=1)))
+```
+
+```{r}
+svm.fit <- svm(data=set1.prediction.list[[2]], bResult ~ ., kernel="radial", gamma=0.01, cost=0.1, cross=5)
+svm.pred.train <- predict(svm.fit, newdata=set1.prediction.list[[2]])
+svm.pred.val <- predict(svm.fit, newdata=set2.prediction.list[[2]])
+svm.pred.test <- predict(svm.fit, newdata=set3.prediction.list[[2]])
+svm.train.err = c(svm.train.err, mean(ifelse(svm.pred.train == set1.prediction.list[[2]]$bResult, yes=0, no=1)))
+svm.val.err = c(svm.val.err, mean(ifelse(svm.pred.val == set2.prediction.list[[2]]$bResult, yes=0, no=1)))
+svm.test.err = c(svm.test.err, mean(ifelse(svm.pred.test == set3.prediction.list[[2]]$bResult, yes=0, no=1)))
+```
+
+```{r}
+svm.fit <- svm(data=set1.prediction.list[[3]], bResult ~ ., kernel="radial", gamma=0.01, cost=0.1, cross=5)
+svm.pred.train <- predict(svm.fit, newdata=set1.prediction.list[[3]])
+svm.pred.val <- predict(svm.fit, newdata=set2.prediction.list[[3]])
+svm.pred.test <- predict(svm.fit, newdata=set3.prediction.list[[3]])
+svm.train.err = c(svm.train.err, mean(ifelse(svm.pred.train == set1.prediction.list[[3]]$bResult, yes=0, no=1)))
+svm.val.err = c(svm.val.err, mean(ifelse(svm.pred.val == set2.prediction.list[[3]]$bResult, yes=0, no=1)))
+svm.test.err = c(svm.test.err, mean(ifelse(svm.pred.test == set3.prediction.list[[3]]$bResult, yes=0, no=1)))
+```
+
+
+```{r}
+svm.train.err
+svm.val.err
+svm.test.err
+```
+
+
+
+2.11 Model selection
+
+```{r}
+models = c("lda", "qda", "log", "lasso", "nb", "nb.pca", "gam", "class.t", "rf", "gbm", "svm")
+train.err = list(lda.train.err, qda.train.err, logit.train.err, lasso.logit.1se.train.err, naive.k.train.err, naive.k.pca.train.err, gam.logit.train.err, veh.tree.1se.train.err, veh.rftree.train.err, gbm.train.err, svm.train.err)
+
+val.err = list(lda.val.err, qda.val.err, logit.val.err, lasso.logit.1se.val.err, naive.k.val.err, naive.k.pca.val.err, gam.logit.val.err, veh.tree.1se.val.err, veh.rftree.val.err, gbm.val.err, svm.val.err)
+
+test.err = list(lda.test.err, qda.test.err, logit.test.err, lasso.logit.1se.test.err, naive.k.test.err, naive.k.pca.test.err, gam.logit.test.err, veh.tree.1se.test.err, veh.rftree.test.err, gbm.test.err, svm.test.err)
+```
+
+
+```{r}
+for (i in 1:3) {
+  curErr = c()
+  for (err in test.err) {
+    curErr = c(curErr, err[i])
+  }
+  if (i == 1) {
+    plot(curErr, xaxt = "n", ylim=c(0,0.4), col="red", pch = 10, ylab = "test error", xlab ="")
+    axis(1, at=1:11, labels=models)
+  } else if (i ==2) {
+    points(curErr, col="blue", pch = 13)
+  } else {
+    points(curErr, col="purple", pch = 11)
+  }
+  
+  
+}
+```
+
+Choose logistic 
+
+3.1 
+```{r}
+logit.train.prob = logit.train.prob.list[[1]]
+set1.prediction = set1.prediction.list[[1]]
+plot(x = set1.prediction$goldblueMiddle10[order(logit.train.prob)], y = logit.train.prob[order(logit.train.prob)], xlab="gold of middle at 10 mins", ylab="prob")
+```
+
+```{r}
+logit.train.prob = logit.train.prob.list[[2]]
+set1.prediction = set1.prediction.list[[2]]
+plot(x = set1.prediction$goldblueMiddle20[order(logit.train.prob)], y = logit.train.prob[order(logit.train.prob)], xlab="gold of middle at 20 mins", ylab="prob")
+```
+
+
+```{r}
+logit.train.prob = logit.train.prob.list[[3]]
+set1.prediction = set1.prediction.list[[3]]
+plot(x = set1.prediction$goldblueMiddle30[order(logit.train.prob)], y = logit.train.prob[order(logit.train.prob)], xlab="gold of middle at 30 mins", ylab="prob")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
